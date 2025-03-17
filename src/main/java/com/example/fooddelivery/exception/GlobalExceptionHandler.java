@@ -18,7 +18,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidVehicleException.class)
     public ResponseEntity<ErrorResponse> handleInvalidVehicleException(InvalidVehicleException ex) {
-        return errorResponseBuilder(ex.getMessage(), "Vehicle restriction due to weather conditions",
+        return errorResponseBuilder(ex.getMessage(), "Usage of selected vehicle type is forbidden",
                 HttpStatus.BAD_REQUEST);
     }
 
