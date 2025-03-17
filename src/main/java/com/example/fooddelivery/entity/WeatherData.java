@@ -1,13 +1,14 @@
 package com.example.fooddelivery.entity;
 
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+@Getter @Setter
 @Entity
-@Data
 @Table(name="weather_data")
 public class WeatherData {
     @Id
