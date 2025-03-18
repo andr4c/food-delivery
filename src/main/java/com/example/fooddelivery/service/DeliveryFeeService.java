@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 @Service
@@ -80,10 +81,28 @@ public class DeliveryFeeService {
 
                 }
             }
+
+            String weatherPhenom = weatherData.getWeatherPhenomenon();
+
+            // Extra fee based on weather phenomenon (WPEF) in a specific city is paid in case
+            // Vehicle type = Scooter or Bike and:
+            // Weather phenomenon is related to snow or sleet, then WPEF = 1€
+            // In case of glaze, hail, or thunder -> throw error
+            List<ExtraFee> weatherPhenomenonFees = extraFeeRepository.findByConditionType("weather_phenomenon");
+            for (ExtraFee weatherPhenomFee : weatherPhenomenonFees) {
+
+                String weatherPhenomFeeConditionValue = weatherData.getWeatherPhenomenon().toLowerCase();
+                if (weatherPhenom.contains(weatherPhenomFeeConditionValue)) {
+                    if (Boolean.TRUE.equals(weatherPhenomFee.getIsForbidden())) {
+                        throw new InvalidVehicleException("Usage of selected vehicle type is forbidden");
+                    }
+
+                    extraFee += weatherPhenomFee.getFee().doubleValue();
+                }
+            }
         }
 
         return new DeliveryFeeResponse("Total delivery fee: ", totalFee + extraFee);
     }
-
 
 }
