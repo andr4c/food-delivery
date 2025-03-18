@@ -5,6 +5,7 @@ import com.example.fooddelivery.dto.DeliveryFeeResponse;
 import com.example.fooddelivery.entity.BaseFee;
 import com.example.fooddelivery.entity.ExtraFee;
 import com.example.fooddelivery.entity.WeatherData;
+import com.example.fooddelivery.exception.InvalidVehicleException;
 import com.example.fooddelivery.repository.BaseFeeRepository;
 import com.example.fooddelivery.repository.ExtraFeeRepository;
 import com.example.fooddelivery.repository.WeatherDataRepository;
@@ -58,6 +59,25 @@ public class DeliveryFeeService {
                 BigDecimal airTempFeeConditionValue = new BigDecimal(airTempFee.getConditionValue());
                 if (airTemperature.compareTo(airTempFeeConditionValue) < 0) {
                     extraFee += airTempFee.getFee().doubleValue();
+                }
+            }
+
+            BigDecimal windSpeed = weatherData.getWindSpeed();
+
+            // Extra fee based on wind speed (WSEF) in a specific city is paid in case
+            // Vehicle type = Bike and:
+            // Wind speed is between 10 m/s and 20 m/s, then WSEF = 0.5€
+            // If wind speed is greater than 20 m/s -> throw error
+            List<ExtraFee> windSpeedFees = extraFeeRepository.findByConditionType("wind_speed");
+            for (ExtraFee windSpeedFee : windSpeedFees) {
+
+                BigDecimal windSpeedFeeConditionValue = new BigDecimal(windSpeedFee.getConditionValue());
+                if (windSpeed.compareTo(windSpeedFeeConditionValue) > 0) {
+                    if (Boolean.TRUE.equals(windSpeedFee.getIsForbidden())) {
+                        throw new InvalidVehicleException("Usage of selected vehicle type is forbidden");
+                    }
+                    extraFee += windSpeedFee.getFee().doubleValue();
+
                 }
             }
         }
