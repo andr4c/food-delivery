@@ -2,20 +2,20 @@ package com.example.fooddelivery.service;
 
 import com.example.fooddelivery.entity.WeatherData;
 import com.example.fooddelivery.repository.WeatherDataRepository;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
+import java.util.Objects;
 
 @Service
 public class WeatherDataService {
@@ -33,83 +33,131 @@ public class WeatherDataService {
         this.weatherDataRepository = weatherDataRepository;
     }
 
+    /**
+     * Fetches weather data from the external API, parses it, and stores new records in the database.
+     */
     public void fetchAndStoreWeatherData() {
         try {
             logger.info("Fetching weather data from {}", apiUrl);
-            Document document = Jsoup.connect(apiUrl).get();
+            Document document = Jsoup.connect(apiUrl).timeout(10_000).get();
             Elements stations = document.select("station");
 
             List<WeatherData> weatherDataList = stations.stream()
-                    .filter(station -> targetStations.contains(getTextOrDefault(station, "name", "Unknown")))
+                    .filter(station -> targetStations.contains(getTextOrNull(station, "name")))
                     .map(this::parseWeatherData)
-                    .filter(Optional::isPresent)
-                    .map(Optional::get)
+                    .filter(Objects::nonNull)
                     .toList();
 
+            if (weatherDataList.isEmpty()) {
+                logger.warn("No weather data found from API. Possible issue with {}", apiUrl);
+            } else {
+                logger.info("Parsed {} weather records", weatherDataList.size());
+            }
+
             for (WeatherData weatherData : weatherDataList) {
-                if (weatherDataRepository.countByWmoCodeAndTimestamp(weatherData.getWmoCode(), weatherData.getTimestamp()) == 0) {
+                if (Boolean.FALSE.equals(weatherDataRepository.existsByWmoCodeAndTimestamp(
+                        weatherData.getWmoCode(), weatherData.getTimestamp()))) {
                     weatherDataRepository.save(weatherData);
-                    logger.info("Saved weather data for {} at {}", weatherData.getStationName(), weatherData.getTimestamp());
+                    logger.info("Saved weather data for {} at {}",
+                            weatherData.getStationName(), weatherData.getTimestamp());
                 } else {
-                    logger.info("Skipping duplicate weather data for {} at {}", weatherData.getStationName(), weatherData.getTimestamp());
+                    logger.debug("Skipping duplicate weather data for {} at {}",
+                            weatherData.getStationName(), weatherData.getTimestamp());
                 }
             }
         } catch (IOException e) {
-            logger.error("Failed to fetch weather data", e);
+            logger.error("Failed to fetch weather data from {}: {}", apiUrl, e.getMessage(), e);
+        } catch (Exception e) {
+            logger.error("Unexpected error during weather data fetching", e);
         }
     }
 
+    /**
+     * Scheduled method to periodically import weather data based on a cron expression.
+     */
     @Scheduled(cron = "${weather.cron.expression}")
     public void scheduledWeatherDataImport() {
         logger.info("Running scheduled weather data import...");
         fetchAndStoreWeatherData();
     }
 
-    private Optional<WeatherData> parseWeatherData(Element station) {
-        String stationName = getTextOrDefault(station, "name", "Unknown");
-        Optional<Integer> wmoCodeOpt = getOptionalInteger(station, "wmocode");
-        BigDecimal temperature = getBigDecimalOrDefault(station, "airtemperature");
-        BigDecimal windSpeed = getBigDecimalOrDefault(station, "windspeed");
-        String weatherPhenomenon = getTextOrDefault(station, "phenomenon", "Unknown");
-        LocalDateTime timestamp = LocalDateTime.now();
+    /**
+     * Parses weather data from an HTML element.
+     *
+     * @param station The HTML element containing weather data.
+     * @return A WeatherData object, or null if parsing fails.
+     */
+    private WeatherData parseWeatherData(Element station) {
+        String stationName = getTextOrNull(station, "name");
+        Integer wmoCode = getOptionalInteger(station);
+        Double temperature = getDoubleOrNull(station, "airtemperature");
+        Double windSpeed = getDoubleOrNull(station, "windspeed");
+        String weatherPhenomenon = getTextOrNull(station, "phenomenon");
 
-        if (wmoCodeOpt.isEmpty()) {
+        if (wmoCode == null) {
             logger.warn("Skipping station {} due to missing WMO code", stationName);
-            return Optional.empty();
+            return null;
         }
 
         WeatherData weatherData = new WeatherData();
         weatherData.setStationName(stationName);
-        weatherData.setWmoCode(wmoCodeOpt.get());
+        weatherData.setWmoCode(wmoCode);
         weatherData.setAirTemperature(temperature);
         weatherData.setWindSpeed(windSpeed);
         weatherData.setWeatherPhenomenon(weatherPhenomenon);
-        weatherData.setTimestamp(timestamp);
+        weatherData.setTimestamp(LocalDateTime.now());
 
-        return Optional.of(weatherData);
+        return weatherData;
     }
 
-    private String getTextOrDefault(Element element, String tag, String defaultValue) {
+    /**
+     * Retrieves the text content of a given tag or returns null if absent or blank.
+     *
+     * @param element The parent HTML element.
+     * @param tag     The child tag to extract text from.
+     * @return The trimmed text content, or null if not found or blank.
+     */
+    private String getTextOrNull(Element element, String tag) {
         Element selected = element.selectFirst(tag);
-        return (selected != null) ? selected.text() : defaultValue;
+        return (selected != null && !selected.text().isBlank()) ? selected.text().trim() : null;
     }
 
-    private BigDecimal getBigDecimalOrDefault(Element element, String tag) {
+    /**
+     * Parses a double value from a given tag or returns null if not present or invalid.
+     *
+     * @param element The parent HTML element.
+     * @param tag     The child tag containing the double value.
+     * @return The parsed double value, or null if invalid.
+     */
+    private Double getDoubleOrNull(Element element, String tag) {
+        String textValue = getTextOrNull(element, tag);
+        if (textValue == null) {
+            return null;
+        }
         try {
-            String textValue = getTextOrDefault(element, tag, BigDecimal.ZERO.toString());
-            return new BigDecimal(textValue);
+            return Double.parseDouble(textValue);
         } catch (NumberFormatException e) {
-            logger.warn("Invalid number for {}: {}", tag, e.getMessage());
-            return BigDecimal.ZERO;
+            logger.warn("Invalid number format for {}: {}", tag, textValue);
+            return null;
         }
     }
 
-    private Optional<Integer> getOptionalInteger(Element element, String tag) {
+    /**
+     * Parses an integer value from the "wmocode" tag or returns null if not present or invalid.
+     *
+     * @param element The parent HTML element.
+     * @return The parsed integer value, or null if invalid.
+     */
+    private Integer getOptionalInteger(Element element) {
+        String textValue = getTextOrNull(element, "wmocode");
+        if (textValue == null) {
+            return null;
+        }
         try {
-            return Optional.of(Integer.parseInt(getTextOrDefault(element, tag, "0")));
+            return Integer.parseInt(textValue);
         } catch (NumberFormatException e) {
-            logger.warn("Invalid number for {}: {}", tag, e.getMessage());
-            return Optional.empty();
+            logger.warn("Invalid integer format for {}: {}", "wmocode", textValue);
+            return null;
         }
     }
 }
