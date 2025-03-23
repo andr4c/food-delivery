@@ -4,10 +4,15 @@ import com.example.fooddelivery.entity.WeatherData;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 
+@Repository
 public interface WeatherDataRepository extends JpaRepository<WeatherData, Long> {
-    @Query("SELECT COUNT(w) FROM WeatherData w WHERE w.wmoCode = :wmoCode AND w.timestamp = :timestamp")
-    long countByWmoCodeAndTimestamp(@Param("wmoCode") Integer wmoCode, @Param("timestamp") LocalDateTime timestamp);
+    Boolean existsByWmoCodeAndTimestamp(Integer wmoCode, LocalDateTime timestamp);
+
+    @Query("SELECT w FROM WeatherData w WHERE LOWER(w.stationName) LIKE LOWER(CONCAT('%', :stationName, '%'))")
+    Optional<WeatherData> findByStationNameContaining(@Param("stationName") String stationName);
 }
