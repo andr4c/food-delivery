@@ -20,6 +20,9 @@ import java.util.Optional;
 @Service
 public class DeliveryFeeService {
 
+    private static final String USAGE_FORBIDDEN_MESSAGE =
+            "Usage of selected vehicle type is forbidden due to weather conditions";
+
     private static final Logger logger = LoggerFactory.getLogger(DeliveryFeeService.class);
 
     private final BaseFeeRepository baseFeeRepository;
@@ -85,7 +88,7 @@ public class DeliveryFeeService {
         WeatherData weatherData = latestWeatherData.get();
 
         if (isForbidden(vehicleType, weatherData)) {
-            throw new InvalidVehicleException("Usage of selected vehicle type is forbidden due to weather conditions");
+            throw new InvalidVehicleException(USAGE_FORBIDDEN_MESSAGE);
         }
 
         Double airTemperatureFee = getAirTemperatureFee(vehicleType, weatherData.getAirTemperature());
@@ -140,9 +143,7 @@ public class DeliveryFeeService {
             if (windSpeed > fee.getMaxValue()) {  // Forbidden case
                 logger.error("Vehicle type {} is forbidden due to wind speed {} m/s", vehicleType, windSpeed);
 
-                throw new InvalidVehicleException(
-                        "Usage of selected vehicle type is forbidden due to weather conditions"
-                );
+                throw new InvalidVehicleException(USAGE_FORBIDDEN_MESSAGE);
             }
 
             if (windSpeed > fee.getMinValue() && windSpeed < fee.getMaxValue()) {
@@ -175,9 +176,7 @@ public class DeliveryFeeService {
                     logger.error("Vehicle type {} is forbidden due to weather phenomenon '{}'",
                             vehicleType, weatherPhenomenon);
 
-                    throw new InvalidVehicleException(
-                            "Usage of selected vehicle type is forbidden due to weather conditions"
-                    );
+                    throw new InvalidVehicleException(USAGE_FORBIDDEN_MESSAGE);
                 }
 
                 return fee.getFee();
