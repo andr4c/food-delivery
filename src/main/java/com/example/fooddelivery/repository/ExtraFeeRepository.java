@@ -7,6 +7,6 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface ExtraFeeRepository extends JpaRepository <ExtraFee, Long> {
-    List<ExtraFee> findByConditionType(String conditionType);
+public interface ExtraFeeRepository extends JpaRepository<ExtraFee, Long> {
+    List<ExtraFee> findByConditionTypeAndVehicleType(String conditionType, String vehicleType);
 }
