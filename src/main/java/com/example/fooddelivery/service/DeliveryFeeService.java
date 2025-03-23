@@ -5,19 +5,22 @@ import com.example.fooddelivery.dto.DeliveryFeeResponse;
 import com.example.fooddelivery.entity.BaseFee;
 import com.example.fooddelivery.entity.ExtraFee;
 import com.example.fooddelivery.entity.WeatherData;
+import com.example.fooddelivery.exception.BaseFeeNotFoundException;
 import com.example.fooddelivery.exception.InvalidVehicleException;
 import com.example.fooddelivery.repository.BaseFeeRepository;
 import com.example.fooddelivery.repository.ExtraFeeRepository;
 import com.example.fooddelivery.repository.WeatherDataRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 
 @Service
 public class DeliveryFeeService {
+
+    private static final Logger logger = LoggerFactory.getLogger(DeliveryFeeService.class);
 
     private final BaseFeeRepository baseFeeRepository;
     private final ExtraFeeRepository extraFeeRepository;
@@ -31,78 +34,170 @@ public class DeliveryFeeService {
         this.weatherDataRepository = weatherDataRepository;
     }
 
+    /**
+     * Calculates the total delivery fee based on base fees and applicable extra fees.
+     *
+     * @param deliveryFeeRequest The request containing city and vehicle type.
+     * @return DeliveryFeeResponse containing the total fee.
+     */
     public DeliveryFeeResponse calculateDeliveryFee(DeliveryFeeRequest deliveryFeeRequest) {
         String city = deliveryFeeRequest.getCity();
         String vehicleType = deliveryFeeRequest.getVehicleType();
 
-        // Fetch base fee from database
-        BaseFee baseFee = baseFeeRepository.findByCityAndVehicleType(city, vehicleType)
-                .orElseThrow(() -> new IllegalArgumentException("Invalid city or vehicle type"));
+        Double baseFee = getBaseFee(city, vehicleType);
+        Double extraFee = getExtraFees(city, vehicleType);
 
-        double totalFee = baseFee.getFee().doubleValue();
-        double extraFee = 0.0;
+        Double totalFee = baseFee + extraFee;
 
-        Optional<WeatherData> latestWeatherData = weatherDataRepository
-                .findFirstByStationNameOrderByTimestampDesc(city);
+        return new DeliveryFeeResponse(String.format("Total delivery fee: %.2f", totalFee), totalFee);
+    }
 
-        if (latestWeatherData.isPresent()) {
-            WeatherData weatherData = latestWeatherData.get();
+    /**
+     * Retrieves the base fee for a given city and vehicle type from the database.
+     *
+     * @param city        The city for delivery.
+     * @param vehicleType The type of vehicle.
+     * @return The base fee amount.
+     */
+    public Double getBaseFee(String city, String vehicleType) {
+        return baseFeeRepository.findByCityAndVehicleType(city, vehicleType)
+                .map(BaseFee::getFee)
+                .orElseThrow(() -> new BaseFeeNotFoundException(
+                        "No base fee found for city: " + city + " and vehicle type: " + vehicleType)
+                );
+    }
 
-            BigDecimal airTemperature = weatherData.getAirTemperature();
+    /**
+     * Calculates the extra fees based on weather conditions and stored fee rules.
+     *
+     * @param city        The city for delivery.
+     * @param vehicleType The type of vehicle.
+     * @return The extra fee amount.
+     */
+    private Double getExtraFees(String city, String vehicleType) {
+        Optional<WeatherData> latestWeatherData = weatherDataRepository.findByStationNameContaining(city);
 
-            // Extra fee based on air temperature (ATEF) in a specific city is paid in case
-            // Vehicle type = Scooter or Bike and:
-            // Air temperature is less than -10, then ATEF = 1€
-            // Air temperature is between -10 and 0, then ATEF = 0.5€
-            List<ExtraFee> airTempFees = extraFeeRepository.findByConditionType("air_temperature");
-            for (ExtraFee airTempFee : airTempFees) {
+        if (latestWeatherData.isEmpty()) {
+            logger.warn("No weather data found for city: {}", city);
+            return 0.0;
+        }
 
-                BigDecimal airTempFeeConditionValue = new BigDecimal(airTempFee.getConditionValue());
-                if (airTemperature.compareTo(airTempFeeConditionValue) < 0) {
-                    extraFee += airTempFee.getFee().doubleValue();
-                }
-            }
+        WeatherData weatherData = latestWeatherData.get();
 
-            BigDecimal windSpeed = weatherData.getWindSpeed();
+        if (isForbidden(vehicleType, weatherData)) {
+            throw new InvalidVehicleException("Usage of selected vehicle type is forbidden due to weather conditions");
+        }
 
-            // Extra fee based on wind speed (WSEF) in a specific city is paid in case
-            // Vehicle type = Bike and:
-            // Wind speed is between 10 m/s and 20 m/s, then WSEF = 0.5€
-            // If wind speed is greater than 20 m/s -> throw error
-            List<ExtraFee> windSpeedFees = extraFeeRepository.findByConditionType("wind_speed");
-            for (ExtraFee windSpeedFee : windSpeedFees) {
+        Double airTemperatureFee = getAirTemperatureFee(vehicleType, weatherData.getAirTemperature());
+        Double windSpeedFee = getWindSpeedFee(vehicleType, weatherData.getWindSpeed());
+        Double weatherPhenomenonFee = getWeatherPhenomenonFee(vehicleType, weatherData.getWeatherPhenomenon());
 
-                BigDecimal windSpeedFeeConditionValue = new BigDecimal(windSpeedFee.getConditionValue());
-                if (windSpeed.compareTo(windSpeedFeeConditionValue) > 0) {
-                    if (Boolean.TRUE.equals(windSpeedFee.getIsForbidden())) {
-                        throw new InvalidVehicleException("Usage of selected vehicle type is forbidden");
-                    }
-                    extraFee += windSpeedFee.getFee().doubleValue();
+        return airTemperatureFee + windSpeedFee + weatherPhenomenonFee;
+    }
 
-                }
-            }
+    /**
+     * Calculates the extra fee based on air temperature.
+     *
+     * @param vehicleType    The type of vehicle used for delivery.
+     * @param airTemperature The recorded air temperature.
+     * @return Extra fee based on air temperature conditions.
+     */
+    Double getAirTemperatureFee(String vehicleType, Double airTemperature) {
+        if (airTemperature == null || vehicleType == null) {
+            return 0.0;
+        }
 
-            String weatherPhenom = weatherData.getWeatherPhenomenon();
+        List<ExtraFee> airTempFees = extraFeeRepository.findByConditionTypeAndVehicleType(
+                "air_temperature", vehicleType
+        );
 
-            // Extra fee based on weather phenomenon (WPEF) in a specific city is paid in case
-            // Vehicle type = Scooter or Bike and:
-            // Weather phenomenon is related to snow or sleet, then WPEF = 1€
-            // In case of glaze, hail, or thunder -> throw error
-            List<ExtraFee> weatherPhenomenonFees = extraFeeRepository.findByConditionType("weather_phenomenon");
-            for (ExtraFee weatherPhenomFee : weatherPhenomenonFees) {
-
-                String weatherPhenomFeeConditionValue = weatherData.getWeatherPhenomenon().toLowerCase();
-                if (weatherPhenom.contains(weatherPhenomFeeConditionValue)) {
-                    if (Boolean.TRUE.equals(weatherPhenomFee.getIsForbidden())) {
-                        throw new InvalidVehicleException("Usage of selected vehicle type is forbidden");
-                    }
-
-                    extraFee += weatherPhenomFee.getFee().doubleValue();
-                }
+        for (ExtraFee fee : airTempFees) {
+            if (airTemperature > fee.getMinValue() && airTemperature < fee.getMaxValue()) {
+                return fee.getFee();
             }
         }
 
-        return new DeliveryFeeResponse("Total delivery fee: ", totalFee + extraFee);
+        return 0.0;
     }
 
+    /**
+     * Calculates extra fee based on wind speed.
+     *
+     * @param vehicleType The type of vehicle.
+     * @param windSpeed   The recorded wind speed.
+     * @return The applicable extra fee.
+     */
+    Double getWindSpeedFee(String vehicleType, Double windSpeed) {
+        if (windSpeed == null || vehicleType == null) {
+            return 0.0;
+        }
+
+        List<ExtraFee> windSpeedFees = extraFeeRepository.findByConditionTypeAndVehicleType(
+                "wind_speed", vehicleType
+        );
+
+        for (ExtraFee fee : windSpeedFees) {
+            if (windSpeed > fee.getMaxValue()) {  // Forbidden case
+                logger.error("Vehicle type {} is forbidden due to wind speed {} m/s", vehicleType, windSpeed);
+
+                throw new InvalidVehicleException(
+                        "Usage of selected vehicle type is forbidden due to weather conditions"
+                );
+            }
+
+            if (windSpeed > fee.getMinValue() && windSpeed < fee.getMaxValue()) {
+                return fee.getFee();
+            }
+        }
+
+        return 0.0;
+    }
+
+    /**
+     * Calculates extra fee based on weather phenomenon conditions.
+     *
+     * @param vehicleType       The type of vehicle.
+     * @param weatherPhenomenon The weather phenomenon.
+     * @return The applicable extra fee.
+     */
+    Double getWeatherPhenomenonFee(String vehicleType, String weatherPhenomenon) {
+        if (weatherPhenomenon == null || vehicleType == null) {
+            return 0.0;
+        }
+
+        List<ExtraFee> weatherPhenomenonFees = extraFeeRepository.findByConditionTypeAndVehicleType(
+                "weather_phenomenon", vehicleType
+        );
+
+        for (ExtraFee fee : weatherPhenomenonFees) {
+            if (fee.getWeatherPhenomenon().trim().equalsIgnoreCase(weatherPhenomenon.trim())) {
+                if (Boolean.TRUE.equals(fee.getIsForbidden())) {
+                    logger.error("Vehicle type {} is forbidden due to weather phenomenon '{}'",
+                            vehicleType, weatherPhenomenon);
+
+                    throw new InvalidVehicleException(
+                            "Usage of selected vehicle type is forbidden due to weather conditions"
+                    );
+                }
+
+                return fee.getFee();
+            }
+        }
+
+        return 0.0;
+    }
+
+    /**
+     * Checks if a given vehicle type is forbidden based on weather conditions.
+     *
+     * @param vehicleType The type of vehicle.
+     * @param weatherData The current weather data.
+     * @return true if the vehicle type is forbidden under the given weather conditions, false otherwise.
+     */
+    private boolean isForbidden(String vehicleType, WeatherData weatherData) {
+        return extraFeeRepository.findByConditionTypeAndVehicleType("weather_phenomenon", vehicleType)
+                .stream()
+                .anyMatch(fee -> fee.getIsForbidden()
+                        && fee.getWeatherPhenomenon().equalsIgnoreCase(weatherData.getWeatherPhenomenon()));
+    }
 }
