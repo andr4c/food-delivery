@@ -15,11 +15,18 @@ public class GlobalExceptionHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(InvalidDeliveryFeeRequestException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidDeliveryFeeRequestException(
+            InvalidDeliveryFeeRequestException ex) {
+        logger.warn("Invalid request: {}", ex.getMessage());
+        return errorResponseBuilder(ex.getMessage(), "Invalid input data", HttpStatus.BAD_REQUEST);
+    }
+
     @ExceptionHandler(BaseFeeNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleBaseFeeNotFound(BaseFeeNotFoundException ex) {
         logger.warn("Base fee not found: {}", ex.getMessage());
         return errorResponseBuilder(ex.getMessage(), "Base fee not found.",
-                HttpStatus.INTERNAL_SERVER_ERROR);
+                HttpStatus.NOT_FOUND);
     }
 
     @ExceptionHandler(DeliveryFeeCalculationException.class)
@@ -33,14 +40,14 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleExtraFeeDeletionException(ExtraFeeDeletionException ex) {
         logger.warn("Extra fee deletion not successful: {}", ex.getMessage());
         return errorResponseBuilder(ex.getMessage(), "Extra fee deletion not successful",
-                HttpStatus.INTERNAL_SERVER_ERROR);
+                HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(BaseFeeDeletionException.class)
     public ResponseEntity<ErrorResponse> handleBaseFeeDeletionException(BaseFeeDeletionException ex) {
         logger.warn("Base fee deletion not successful: {}", ex.getMessage());
         return errorResponseBuilder(ex.getMessage(), "Base fee deletion not successful",
-                HttpStatus.INTERNAL_SERVER_ERROR);
+                HttpStatus.BAD_REQUEST);
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
