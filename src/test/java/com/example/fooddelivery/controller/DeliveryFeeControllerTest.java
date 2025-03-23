@@ -8,6 +8,8 @@ import com.example.fooddelivery.service.DeliveryFeeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -55,53 +57,20 @@ class DeliveryFeeControllerTest {
         verify(deliveryFeeService, times(1)).calculateDeliveryFee(request);
     }
 
-    @Test
-    void testCalculateDeliveryFee_InvalidInput_ShouldThrowValidationException() {
-        DeliveryFeeRequest invalidRequest = new DeliveryFeeRequest("", "");
-
-        InvalidDeliveryFeeRequestException ex = assertThrows(InvalidDeliveryFeeRequestException.class,
-                () -> deliveryFeeController.calculateDeliveryFee(invalidRequest));
-
-        assertEquals("Invalid request: city and vehicleType must not be empty", ex.getMessage());
-        verify(deliveryFeeService, never()).calculateDeliveryFee(any());
-    }
-
-    @Test
-    void testCalculateDeliveryFee_NullCity_ShouldThrowValidationException() {
-        DeliveryFeeRequest invalidRequest = new DeliveryFeeRequest(null, "Car");
-
-        InvalidDeliveryFeeRequestException ex = assertThrows(InvalidDeliveryFeeRequestException.class,
-                () -> deliveryFeeController.calculateDeliveryFee(invalidRequest));
-
-        assertEquals("Invalid request: city and vehicleType must not be empty", ex.getMessage());
-        verify(deliveryFeeService, never()).calculateDeliveryFee(any());
-    }
-
-    @Test
-    void testCalculateDeliveryFee_NullVehicleType_ShouldThrowValidationException() {
-        DeliveryFeeRequest invalidRequest = new DeliveryFeeRequest("Tallinn", null);
-
-        InvalidDeliveryFeeRequestException ex = assertThrows(InvalidDeliveryFeeRequestException.class,
-                () -> deliveryFeeController.calculateDeliveryFee(invalidRequest));
-
-        assertEquals("Invalid request: city and vehicleType must not be empty", ex.getMessage());
-        verify(deliveryFeeService, never()).calculateDeliveryFee(any());
-    }
-
-    @Test
-    void testCalculateDeliveryFee_BlankCity_ShouldThrowValidationException() {
-        DeliveryFeeRequest invalidRequest = new DeliveryFeeRequest(" ", "Car");
-
-        InvalidDeliveryFeeRequestException ex = assertThrows(InvalidDeliveryFeeRequestException.class,
-                () -> deliveryFeeController.calculateDeliveryFee(invalidRequest));
-
-        assertEquals("Invalid request: city and vehicleType must not be empty", ex.getMessage());
-        verify(deliveryFeeService, never()).calculateDeliveryFee(any());
-    }
-
-    @Test
-    void testCalculateDeliveryFee_BlankVehicleType_ShouldThrowValidationException() {
-        DeliveryFeeRequest invalidRequest = new DeliveryFeeRequest("Tallinn", " ");
+    @ParameterizedTest
+    @CsvSource({
+            "'', 'Car'",         // Blank city
+            "' ', 'Car'",        // Empty city with whitespace
+            "'Tallinn', ''",     // Blank vehicleType
+            "'Tallinn', ' '",    // Empty vehicleType with whitespace
+            "null, 'Car'",       // Null city
+            "'Tallinn', null"    // Null vehicleType
+    })
+    void testCalculateDeliveryFee_InvalidInput_ShouldThrowValidationException(String city, String vehicleType) {
+        DeliveryFeeRequest invalidRequest = new DeliveryFeeRequest(
+                "null".equals(city) ? null : city,
+                "null".equals(vehicleType) ? null : vehicleType
+        );
 
         InvalidDeliveryFeeRequestException ex = assertThrows(InvalidDeliveryFeeRequestException.class,
                 () -> deliveryFeeController.calculateDeliveryFee(invalidRequest));
